@@ -49,13 +49,13 @@ impl Evalutor {
 
         for y in 0..9 {
             for x in 0..9 {
-                let (x,y) = if teban == Teban::Sente {
-                    (x,y)
+                let (x,y,s) = if teban == Teban::Sente {
+                    (x,y,1)
                 } else {
-                    (8-x,8-y)
+                    (8-x,8-y,-1)
                 };
 
-                score += PIECE_SCORE_MAP[banmen.0[y][x] as usize];
+                score += s * PIECE_SCORE_MAP[banmen.0[y][x] as usize];
             }
         }
 

@@ -2,8 +2,9 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::ops::{Add, Deref, Neg, Sub};
 use std::sync::{Arc, atomic, mpsc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::{Instant};
 use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
@@ -17,9 +18,10 @@ use crate::error::ApplicationError;
 use crate::evalutor::Evalutor;
 use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
 
-pub const BASE_DEPTH:u32 = 2;
-pub const MAX_DEPTH:u32 = 6;
-pub const MAX_THREADS:u32 = 1;
+pub const TURN_LIMIT:u32 = 10000;
+pub const BASE_DEPTH:u32 = 10;
+pub const MAX_DEPTH:u32 = 10;
+pub const MAX_THREADS:u32 = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Score {
@@ -70,6 +72,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
+    pub turn_limit:Option<Instant>,
     pub base_depth:u32,
     pub max_depth:u32,
     pub max_threads:u32,
@@ -85,6 +88,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:self.info_sender.clone(),
             on_error_handler:Arc::clone(&self.on_error_handler),
             hasher:Arc::clone(&self.hasher),
+            turn_limit:self.turn_limit.clone(),
             base_depth:self.base_depth,
             max_depth:self.max_depth,
             max_threads:self.max_threads,
@@ -98,13 +102,14 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
 #[derive(Debug)]
 pub enum EvaluationResult {
     Immediate(Score, VecDeque<LegalMove>, ZobristHash<u64>),
-    Timeout
+    Timeout(Option<(Score, VecDeque<LegalMove>, ZobristHash<u64>)>)
 }
 impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
     pub fn new(event_queue:Arc<Mutex<UserEventQueue>>,
                info_sender:S,
                on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                hasher:Arc<KyokumenHash<u64>>,
+               turn_limit:Option<Instant>,
                base_depth:u32,
                max_depth:u32,
                max_threads:u32,
@@ -118,6 +123,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
+            turn_limit:turn_limit,
             base_depth:base_depth,
             max_depth:max_depth,
             max_threads:max_threads,
@@ -151,6 +157,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                      evalutor: &Arc<Evalutor>) -> Result<EvaluationResult,ApplicationError>;
+    fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
+        env.turn_limit.map(|l| Instant::now() >= l).unwrap_or(false)
+    }
 
     fn send_info(&self, env:&mut Environment<L,S>,
                  depth:u32, seldepth:u32, pv:&VecDeque<LegalMove>, score:&Score) -> Result<(),ApplicationError>
@@ -298,7 +307,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         if let Some(e) = last_error {
             e
         } else if is_timeout && best_moves.is_empty() {
-            Ok(EvaluationResult::Timeout)
+            Ok(EvaluationResult::Timeout(None))
         } else {
             Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
         }
@@ -348,8 +357,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     EvaluationResult::Immediate(s, mvs,zh) => {
                         self.update_tt(env,&zh,gs.depth,s);
 
-                        if -s > scoreval {
-                            scoreval = -s;
+                        let s = -s;
+
+                        if s > scoreval {
+                            scoreval = s;
 
                             best_moves = mvs;
 
@@ -373,11 +384,19 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             break;
                         }
                     },
-                    EvaluationResult::Timeout if best_moves.is_empty() => {
+                    EvaluationResult::Timeout(Some((s,mvs,_))) => {
+                        if -s > scoreval {
+                            scoreval = -s;
+                            best_moves = mvs;
+                            is_timeout = true;
+                            break;
+                        }
+                    },
+                    EvaluationResult::Timeout(None) if best_moves.is_empty() => {
                         is_timeout = true;
                         break;
                     },
-                    EvaluationResult::Timeout => {
+                    EvaluationResult::Timeout(None) => {
                         break;
                     }
                 }
@@ -452,7 +471,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         threads -= 1;
                     }
                 }
-            } else if threads < env.max_threads.min(mvs_count as u32) {
+            } else if threads == env.max_threads.min(mvs_count as u32) {
                 force_recv = true;
             } else {
                 break;
@@ -481,18 +500,22 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             depth += 1;
 
             match current_result {
-                r @ EvaluationResult::Immediate(_,_,_) if  base_depth + 1 == depth => {
-                    return Ok(r);
+                EvaluationResult::Immediate(s,mvs,zh) if base_depth + 1 == depth && mvs.len() > 0 => {
+                    return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Immediate(s,mvs,zh) => {
+                EvaluationResult::Immediate(_,_,_) if base_depth + 1 == depth => {
+                    return Ok(result.unwrap_or(EvaluationResult::Timeout(None)));
+                },
+                EvaluationResult::Immediate(s,mvs,zh) if mvs.len() > 0 => {
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Timeout if best_moves.is_empty() => {
-                    return Ok(EvaluationResult::Timeout)
+                EvaluationResult::Immediate(_,_,_) => (),
+                EvaluationResult::Timeout(Some((s,mvs,zh))) => {
+                    return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Timeout => {
-                    return Ok(result.unwrap_or(EvaluationResult::Timeout));
+                EvaluationResult::Timeout(None) => {
+                    return Ok(result.unwrap_or(EvaluationResult::Timeout(None)));
                 }
             }
         }
@@ -514,6 +537,12 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
     fn search<'a, 'b>(&self, env: &mut Environment<L, S>, gs: &mut GameState<'a>,
                       event_dispatcher: &mut UserEventDispatcher<'b, Recursive<L, S>, ApplicationError, L>,
                       evalutor: &Arc<Evalutor>) -> Result<EvaluationResult, ApplicationError> {
+        env.nodes.fetch_add(1,Ordering::Release);
+
+        if self.timelimit_reached(env) {
+            return Ok(EvaluationResult::Timeout(None));
+        }
+
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
             "move is not set."
         )))?;
@@ -596,12 +625,16 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     let strategy = Recursive::new();
 
                     match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
-                        EvaluationResult::Timeout if best_moves.is_empty() => {
-                            return Ok(EvaluationResult::Timeout);
+                        EvaluationResult::Timeout(Some((s,mut mvs,_))) => {
+                            mvs.push_front(prev_move);
+                            return Ok(EvaluationResult::Timeout(Some((-s,mvs,prev_zh))));
                         },
-                        EvaluationResult::Timeout => {
+                        EvaluationResult::Timeout(None) if best_moves.len() > 0 => {
                             best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Immediate(scoreval, best_moves,prev_zh.clone()));
+                            return Ok(EvaluationResult::Timeout(Some((scoreval,best_moves,prev_zh))));
+                        },
+                        EvaluationResult::Timeout(None) => {
+                            return Ok(EvaluationResult::Timeout(None));
                         },
                         EvaluationResult::Immediate(s, mvs, zh) => {
                             self.update_tt(env,&zh,gs.depth,s);
@@ -609,7 +642,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             let s = -s;
 
                             if s > scoreval {
-                                scoreval = -s;
+                                scoreval = s;
 
                                 best_moves = mvs;
 
@@ -631,16 +664,17 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     if env.stop.load(atomic::Ordering::Acquire) {
                         if best_moves.is_empty() {
-                            return Ok(EvaluationResult::Timeout);
+                            return Ok(EvaluationResult::Timeout(None));
                         } else {
                             best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                            return Ok(EvaluationResult::Timeout(Some((scoreval, best_moves, prev_zh.clone()))));
                         }
                     }
                 }
             }
         }
 
+        best_moves.push_front(prev_move);
         Ok(EvaluationResult::Immediate(scoreval, best_moves,gs.zh.clone()))
     }
 }

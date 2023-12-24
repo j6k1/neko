@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -15,7 +15,7 @@ use usiagent::rule::{AppliedMove, Kyokumen, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
 use crate::error::ApplicationError;
 use crate::evalutor::Evalutor;
-use crate::search::{BASE_DEPTH, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_THREADS, Root, Score, Search};
+use crate::search::{BASE_DEPTH, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_THREADS, Root, Score, Search, TURN_LIMIT};
 use crate::transposition_table::{TT, ZobristHash};
 
 pub trait FromOption {
@@ -62,6 +62,7 @@ pub struct Neko {
     base_depth:u32,
     max_depth:u32,
     max_threads:u32,
+    turn_limit:Option<u32>,
 }
 impl fmt::Debug for Neko {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -79,6 +80,7 @@ impl Neko {
             base_depth:BASE_DEPTH,
             max_depth:MAX_DEPTH,
             max_threads:MAX_THREADS,
+            turn_limit:None,
         }
     }
 }
@@ -93,6 +95,7 @@ impl USIPlayer<ApplicationError> for Neko {
         kinds.insert(String::from("MaxDepth"),SysEventOptionKind::Num);
         kinds.insert(String::from("Threads"),SysEventOptionKind::Num);
         kinds.insert(String::from("BaseDepth"),SysEventOptionKind::Num);
+        kinds.insert(String::from("TurnLimit"),SysEventOptionKind::Num);
 
         Ok(kinds)
     }
@@ -102,6 +105,7 @@ impl USIPlayer<ApplicationError> for Neko {
         options.insert(String::from("BaseDepth"),UsiOptType::Spin(1,100,Some(BASE_DEPTH as i64)));
         options.insert(String::from("MaxDepth"),UsiOptType::Spin(1,100,Some(MAX_DEPTH as i64)));
         options.insert(String::from("Threads"),UsiOptType::Spin(1,1024,Some(MAX_THREADS as i64)));
+        options.insert(String::from("TurnLimit"),UsiOptType::Spin(1,3600000,Some(TURN_LIMIT as i64)));
 
         Ok(options)
     }
@@ -122,6 +126,9 @@ impl USIPlayer<ApplicationError> for Neko {
             },
             "Threads" => {
                 self.max_threads = u32::from_option(value).unwrap_or(MAX_THREADS);
+            },
+            "TurnLimit" => {
+                self.turn_limit = u32::from_option(value);
             },
             _ => ()
         }
@@ -201,6 +208,7 @@ impl USIPlayer<ApplicationError> for Neko {
             info_sender.clone(),
             Arc::clone(&on_error_handler),
             Arc::clone(&self.hasher),
+            self.turn_limit.map(|l| think_start_time + Duration::from_millis(l as u64)),
             self.base_depth,
             self.max_depth,
             self.max_threads,
@@ -262,7 +270,7 @@ impl USIPlayer<ApplicationError> for Neko {
                 let _ = env.on_error_handler.lock().map(|h| h.call(e));
                 BestMove::Resign
             },
-            Ok(EvaluationResult::Timeout) => {
+            Ok(EvaluationResult::Timeout(_)) => {
                 BestMove::Resign
             },
             Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_)) => {
