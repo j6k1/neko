@@ -291,10 +291,16 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         while threads < max_threads {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mvs,_)) => {
+                Ok(EvaluationResult::Immediate(s,mvs,zh)) |
+                Ok(EvaluationResult::Timeout(Some((s,mvs,zh)))) => {
+                    self.update_tt(env,&gs.zh,gs.depth,s);
+
                     if -s > score {
                         score = -s;
                         best_moves = mvs;
+
+                        self.update_best_move(env,&zh,gs.depth - 1, score, best_moves.front().cloned());
+
                         if let Err(e) =  self.send_info(env, gs.base_depth,gs.current_depth,&best_moves,&score) {
                             last_error = Some(Err(e));
                         }
