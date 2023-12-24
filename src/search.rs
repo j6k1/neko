@@ -76,6 +76,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub base_depth:u32,
     pub max_depth:u32,
     pub max_threads:u32,
+    pub abort:Arc<AtomicBool>,
     pub stop:Arc<AtomicBool>,
     pub quited:Arc<AtomicBool>,
     pub transposition_table:Arc<TT<u64,Score,{1<<20},4>>,
@@ -92,6 +93,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             base_depth:self.base_depth,
             max_depth:self.max_depth,
             max_threads:self.max_threads,
+            abort:Arc::clone(&self.abort),
             stop:Arc::clone(&self.stop),
             quited:Arc::clone(&self.quited),
             transposition_table:self.transposition_table.clone(),
@@ -115,6 +117,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                max_threads:u32,
                transposition_table: &Arc<TT<u64,Score,{1 << 20},4>>
     ) -> Environment<L,S> {
+        let abort = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let quited = Arc::new(AtomicBool::new(false));
 
@@ -127,6 +130,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             base_depth:base_depth,
             max_depth:max_depth,
             max_threads:max_threads,
+            abort:abort,
             stop:stop,
             quited:quited,
             transposition_table:Arc::clone(transposition_table),
@@ -280,7 +284,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                               max_threads:u32,
                               mut threads:u32,
                               mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
-        env.stop.store(true,Ordering::Release);
+        env.abort.store(true,Ordering::Release);
 
         let mut score = score;
         let mut last_error = None;
@@ -407,7 +411,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let event_queue = Arc::clone(&env.event_queue);
                 event_dispatcher.dispatch_events(self, &*event_queue)?;
 
-                if env.stop.load(atomic::Ordering::Acquire) {
+                if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
                     is_timeout = true;
                     break;
                 }
@@ -498,7 +502,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let mut result = None;
 
         loop {
-            env.stop.store(false,Ordering::Release);
+            env.abort.store(false,Ordering::Release);
 
             gs.depth = depth;
             gs.base_depth = depth;
@@ -548,7 +552,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                       evalutor: &Arc<Evalutor>) -> Result<EvaluationResult, ApplicationError> {
         env.nodes.fetch_add(1,Ordering::Release);
 
-        if self.timelimit_reached(env) {
+        if self.timelimit_reached(env) || env.abort.load(Ordering::Acquire) || env.stop.load(Ordering::Acquire) {
             return Ok(EvaluationResult::Timeout(None));
         }
 
@@ -671,7 +675,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
-                    if env.stop.load(atomic::Ordering::Acquire) {
+                    if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
                         if best_moves.is_empty() {
                             return Ok(EvaluationResult::Timeout(None));
                         } else {
