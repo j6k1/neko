@@ -277,12 +277,13 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                               gs: &mut GameState<'a>,
                               score:Score,
                               is_timeout:bool,
+                              max_threads:u32,
                               mut threads:u32,
                               mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
         let mut score = score;
         let mut last_error = None;
 
-        while threads > 0 {
+        while threads < max_threads {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
                 Ok(EvaluationResult::Immediate(s,mvs,_)) => {
                     if -s > score {
@@ -292,14 +293,14 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             last_error = Some(Err(e));
                         }
                     }
-                    threads -= 1;
+                    threads += 1;
                 },
                 e @ Err(_) => {
-                    threads -= 1;
+                    threads += 1;
                     last_error = Some(e);
                 }
                 _ => {
-                    threads -= 1;
+                    threads += 1;
                 }
             }
         }
@@ -481,8 +482,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         if scoreval == Score::NEGINFINITE {
             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
         }
-        
-        self.termination(env, &mut gs,scoreval,is_timeout, threads, best_moves)
+
+        self.termination(env, &mut gs,scoreval,is_timeout, env.max_threads.min(mvs_count as u32), threads, best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
