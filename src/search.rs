@@ -675,7 +675,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 alpha = s;
                             }
                         },
-                        EvaluationResult::Timeout(Some((s,mvs,_))) => {
+                        EvaluationResult::Timeout(Some((s,mvs,zh))) => {
                             self.update_tt(env,&zh,gs.depth,s);
 
                             let s = -s;
