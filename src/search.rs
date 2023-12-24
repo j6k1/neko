@@ -401,11 +401,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         if -s > scoreval {
                             scoreval = -s;
                             best_moves = mvs;
-                            is_timeout = true;
-                            break;
                         }
-                    },
-                    EvaluationResult::Timeout(None) if best_moves.is_empty() => {
                         is_timeout = true;
                         break;
                     },
