@@ -417,7 +417,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let event_queue = Arc::clone(&env.event_queue);
                 event_dispatcher.dispatch_events(self, &*event_queue)?;
 
-                if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
+                if env.stop.load(atomic::Ordering::Acquire) {
                     is_timeout = true;
                     break;
                 }
