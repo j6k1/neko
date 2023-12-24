@@ -401,6 +401,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         if -s > scoreval {
                             scoreval = -s;
                             best_moves = mvs;
+                            self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
                         }
                         is_timeout = true;
                         break;
