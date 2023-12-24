@@ -653,34 +653,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     let strategy = Recursive::new();
 
                     match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
-                        EvaluationResult::Timeout(Some((s,mvs,_))) => {
-                            self.update_tt(env,&zh,gs.depth,s);
-
-                            let s = -s;
-
-                            if s > scoreval {
-                                scoreval = s;
-
-                                best_moves = mvs;
-
-                                self.update_best_move(env,&prev_zh,d,scoreval,Some(m));
-
-                                if scoreval >= beta {
-                                    best_moves.push_front(prev_move);
-                                    return Ok(EvaluationResult::Timeout(Some((scoreval, best_moves, prev_zh.clone()))));
-                                }
-                            }
-
-                            best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Timeout(Some((s,best_moves,prev_zh))));
-                        },
-                        EvaluationResult::Timeout(None) if best_moves.len() > 0 => {
-                            best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Timeout(Some((scoreval,best_moves,prev_zh))));
-                        },
-                        EvaluationResult::Timeout(None) => {
-                            return Ok(EvaluationResult::Timeout(None));
-                        },
                         EvaluationResult::Immediate(s, mvs, zh) => {
                             self.update_tt(env,&zh,gs.depth,s);
 
@@ -702,7 +674,30 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             if alpha < s {
                                 alpha = s;
                             }
-                        }
+                        },
+                        EvaluationResult::Timeout(Some((s,mvs,_))) => {
+                            self.update_tt(env,&zh,gs.depth,s);
+
+                            let s = -s;
+
+                            if s > scoreval {
+                                scoreval = s;
+
+                                best_moves = mvs;
+
+                                self.update_best_move(env,&prev_zh,d,scoreval,Some(m));
+                            }
+
+                            best_moves.push_front(prev_move);
+                            return Ok(EvaluationResult::Timeout(Some((s,best_moves,prev_zh))));
+                        },
+                        EvaluationResult::Timeout(None) if best_moves.len() > 0 => {
+                            best_moves.push_front(prev_move);
+                            return Ok(EvaluationResult::Timeout(Some((scoreval,best_moves,prev_zh))));
+                        },
+                        EvaluationResult::Timeout(None) => {
+                            return Ok(EvaluationResult::Timeout(None));
+                        },
                     }
 
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
