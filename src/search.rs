@@ -280,6 +280,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                               max_threads:u32,
                               mut threads:u32,
                               mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
+        env.stop.store(true,Ordering::Release);
+
         let mut score = score;
         let mut last_error = None;
 
@@ -496,6 +498,8 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let mut result = None;
 
         loop {
+            env.stop.store(false,Ordering::Release);
+
             gs.depth = depth;
             gs.base_depth = depth;
             gs.max_depth = env.max_depth - (base_depth - depth);
