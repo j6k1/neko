@@ -579,6 +579,14 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             return Ok(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone()));
         }
 
+        if Rule::is_mate(gs.teban,&gs.state) {
+            let mut mvs = VecDeque::new();
+
+            mvs.push_front(prev_move);
+
+            return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone()));
+        }
+
         if gs.depth == 0 || gs.current_depth >= gs.max_depth {
             let s = Score::Value(evalutor.evalute(gs.teban,&gs.state.get_banmen(),&gs.mc));
 
