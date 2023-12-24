@@ -372,7 +372,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                         let s = -s;
 
-                        if s > scoreval || s == Score::INFINITE {
+                        if s > scoreval {
                             scoreval = s;
 
                             best_moves = mvs;
@@ -651,9 +651,24 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     let strategy = Recursive::new();
 
                     match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
-                        EvaluationResult::Timeout(Some((s,mut mvs,_))) => {
-                            mvs.push_front(prev_move);
-                            return Ok(EvaluationResult::Timeout(Some((-s,mvs,prev_zh))));
+                        EvaluationResult::Timeout(Some((s,mvs,_))) => {
+                            let s = -s;
+
+                            if s > scoreval {
+                                scoreval = s;
+
+                                best_moves = mvs;
+
+                                self.update_best_move(env,&prev_zh,d,scoreval,Some(m));
+
+                                if scoreval >= beta {
+                                    best_moves.push_front(prev_move);
+                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                                }
+                            }
+
+                            best_moves.push_front(prev_move);
+                            return Ok(EvaluationResult::Timeout(Some((s,best_moves,prev_zh))));
                         },
                         EvaluationResult::Timeout(None) if best_moves.len() > 0 => {
                             best_moves.push_front(prev_move);
