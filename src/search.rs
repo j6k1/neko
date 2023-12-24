@@ -652,6 +652,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
                         EvaluationResult::Timeout(Some((s,mvs,_))) => {
+                            self.update_tt(env,&zh,gs.depth,s);
+
                             let s = -s;
 
                             if s > scoreval {
