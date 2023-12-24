@@ -372,7 +372,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                         let s = -s;
 
-                        if s > scoreval {
+                        if s > scoreval || s == Score::INFINITE {
                             scoreval = s;
 
                             best_moves = mvs;
@@ -660,7 +660,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             let s = -s;
 
-                            if s > scoreval {
+                            if s > scoreval || s == Score::INFINITE {
                                 scoreval = s;
 
                                 best_moves = mvs;
