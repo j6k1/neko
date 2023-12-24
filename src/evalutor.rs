@@ -60,14 +60,20 @@ impl Evalutor {
         }
 
         match mc {
-            &MochigomaCollections::Pair(ref mc,_) if teban == Teban::Sente => {
-                for (m,c) in mc.iter() {
+            &MochigomaCollections::Pair(ref ms,ref mg) if teban == Teban::Sente => {
+                for (m,c) in ms.iter() {
                     score += HAND_SCORE_MAP[m as usize] * c as i32;
                 }
+                for (m,c) in mg.iter() {
+                    score -= HAND_SCORE_MAP[m as usize] * c as i32;
+                }
             },
-            &MochigomaCollections::Pair(_, ref mc) => {
-                for (m,c) in mc.iter() {
+            &MochigomaCollections::Pair(ref ms, ref mg) => {
+                for (m,c) in mg.iter() {
                     score += HAND_SCORE_MAP[m as usize] * c as i32;
+                }
+                for (m,c) in ms.iter() {
+                    score -= HAND_SCORE_MAP[m as usize] * c as i32;
                 }
             },
             _ => ()
