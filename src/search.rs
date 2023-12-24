@@ -703,7 +703,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
-                    if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
+                    if env.abort.load(Ordering::Acquire) {
+                        best_moves.push_front(prev_move);
+                        return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                    } else if env.stop.load(atomic::Ordering::Acquire) {
                         if best_moves.is_empty() {
                             return Ok(EvaluationResult::Timeout(None));
                         } else {
