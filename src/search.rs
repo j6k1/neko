@@ -406,6 +406,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         break;
                     },
                     EvaluationResult::Timeout(None) => {
+                        is_timeout = true;
                         break;
                     }
                 }
@@ -665,7 +666,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                 if scoreval >= beta {
                                     best_moves.push_front(prev_move);
-                                    return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                                    return Ok(EvaluationResult::Timeout(Some((scoreval, best_moves, prev_zh.clone()))));
                                 }
                             }
 
