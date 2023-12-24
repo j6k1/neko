@@ -530,6 +530,9 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
                 EvaluationResult::Immediate(_,_,_) => (),
+                EvaluationResult::Timeout(Some((_,mvs,_))) if mvs.is_empty() => {
+                    return Ok(result.unwrap_or(EvaluationResult::Timeout(None)));
+                },
                 EvaluationResult::Timeout(Some((s,mvs,zh))) => {
                     return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
