@@ -478,6 +478,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
+        if scoreval == Score::NEGINFINITE {
+            self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
+        }
+        
         self.termination(env, &mut gs,scoreval,is_timeout, threads, best_moves)
     }
 }
