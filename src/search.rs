@@ -280,7 +280,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                               env:&mut Environment<L,S>,
                               gs: &mut GameState<'a>,
                               score:Score,
-                              is_timeout:bool,
                               max_threads:u32,
                               mut threads:u32,
                               mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
@@ -318,7 +317,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         if let Some(e) = last_error {
             e
-        } else if is_timeout {
+        } else if gs.depth > 1 {
             Ok(EvaluationResult::Timeout)
         } else {
             Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
@@ -345,8 +344,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut alpha = gs.alpha;
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
-
-        let mut is_timeout = false;
 
         let mvs_count = mvs.len() as u64;
 
@@ -390,14 +387,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
 
                         if env.stop.load(atomic::Ordering::Acquire) {
-                            if best_moves.is_empty() {
-                                is_timeout = true;
-                            }
                             break;
                         }
                     },
                     EvaluationResult::Timeout => {
-                        is_timeout = true;
                         break;
                     }
                 }
@@ -406,7 +399,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 event_dispatcher.dispatch_events(self, &*event_queue)?;
 
                 if env.stop.load(atomic::Ordering::Acquire) {
-                    is_timeout = true;
                     break;
                 }
             } else if let Some(m) = it.next() {
@@ -483,7 +475,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
         }
 
-        self.termination(env, &mut gs,scoreval,is_timeout, env.max_threads.min(mvs_count as u32), threads, best_moves)
+        self.termination(env, &mut gs,scoreval,env.max_threads.min(mvs_count as u32), threads, best_moves)
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -517,7 +509,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                _ if env.stop.load(Ordering::Acquire) => {
+                _ if env.stop.load(Ordering::Acquire) || base_depth + 1 == depth => {
                     return Ok(result.unwrap_or(EvaluationResult::Timeout));
                 },
                 _ => ()
@@ -659,8 +651,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 alpha = s;
                             }
                         },
-                        _ => {
-                            break;
+                        EvaluationResult::Timeout => {
+                            return Ok(EvaluationResult::Timeout);
                         }
                     }
 
@@ -673,12 +665,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             }
         }
 
-        if best_moves.is_empty() {
-            Ok(EvaluationResult::Timeout)
-        } else {
-            best_moves.push_front(prev_move);
+        best_moves.push_front(prev_move);
 
-            Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()))
-        }
+        Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()))
     }
 }
