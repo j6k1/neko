@@ -685,9 +685,9 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                             best_moves.push_front(prev_move);
                             return Ok(EvaluationResult::Timeout(Some((scoreval,best_moves,prev_zh)),0));
                         },
-                        EvaluationResult::Timeout(_,_) => {
-                            return Ok(EvaluationResult::Timeout(None,depth));
-                        },
+                        _ => {
+                            break;
+                        }
                     }
 
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
