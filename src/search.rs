@@ -104,7 +104,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
 #[derive(Debug)]
 pub enum EvaluationResult {
     Immediate(Score, VecDeque<LegalMove>, ZobristHash<u64>),
-    Timeout(Option<(Score, VecDeque<LegalMove>, ZobristHash<u64>)>, u32)
+    Timeout
 }
 impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
     pub fn new(event_queue:Arc<Mutex<UserEventQueue>>,
@@ -291,8 +291,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         while threads < max_threads {
             match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mvs,zh)) |
-                Ok(EvaluationResult::Timeout(Some((s,mvs,zh)),0)) => {
+                Ok(EvaluationResult::Immediate(s,mvs,zh)) => {
                     self.update_tt(env,&zh,gs.depth,s);
 
                     if -s > score {
@@ -320,7 +319,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         if let Some(e) = last_error {
             e
         } else if is_timeout && best_moves.is_empty() {
-            Ok(EvaluationResult::Timeout(None,gs.depth))
+            Ok(EvaluationResult::Timeout)
         } else {
             Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
         }
@@ -397,16 +396,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             break;
                         }
                     },
-                    EvaluationResult::Timeout(Some((s,mvs,_)),0) => {
-                        if -s > scoreval {
-                            scoreval = -s;
-                            best_moves = mvs;
-                            self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
-                        }
-                        is_timeout = true;
-                        break;
-                    },
-                    EvaluationResult::Timeout(_,_) => {
+                    EvaluationResult::Timeout => {
                         is_timeout = true;
                         break;
                     }
@@ -521,18 +511,14 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
                 EvaluationResult::Immediate(_,_,_) if base_depth + 1 == depth => {
-                    return Ok(result.unwrap_or(EvaluationResult::Timeout(None,0)));
+                    return Ok(result.unwrap_or(EvaluationResult::Timeout));
                 },
                 EvaluationResult::Immediate(s,mvs,zh) if mvs.len() > 0 => {
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Immediate(_,_,_) => (),
-                EvaluationResult::Timeout(Some((_,mvs,_)),d) if (mvs.is_empty() || d > 0) && env.stop.load(Ordering::Acquire) => {
-                    return Ok(result.unwrap_or(EvaluationResult::Timeout(None,d)));
-                },
-                EvaluationResult::Timeout(Some((s,mvs,zh)),_) if env.stop.load(Ordering::Acquire) => {
-                    return Ok(EvaluationResult::Immediate(s,mvs,zh));
+                _ if env.stop.load(Ordering::Acquire) => {
+                    return Ok(result.unwrap_or(EvaluationResult::Timeout));
                 },
                 _ => ()
             }
@@ -558,7 +544,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         env.nodes.fetch_add(1,Ordering::Release);
 
         if self.timelimit_reached(env) || env.abort.load(Ordering::Acquire) || env.stop.load(Ordering::Acquire) {
-            return Ok(EvaluationResult::Timeout(None, gs.depth));
+            return Ok(EvaluationResult::Timeout);
         }
 
         let prev_move = gs.m.ok_or(ApplicationError::LogicError(String::from(
@@ -673,18 +659,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                 alpha = s;
                             }
                         },
-                        EvaluationResult::Timeout(Some((s,mvs,_,)),0) => {
-                            let s = -s;
-
-                            if s > scoreval {
-                                scoreval = s;
-
-                                best_moves = mvs;
-                            }
-
-                            best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Timeout(Some((scoreval,best_moves,prev_zh)),0));
-                        },
                         _ => {
                             break;
                         }
@@ -693,18 +667,18 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
                     if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
-                        if best_moves.is_empty() {
-                            return Ok(EvaluationResult::Timeout(None,depth));
-                        } else {
-                            best_moves.push_front(prev_move);
-                            return Ok(EvaluationResult::Timeout(Some((scoreval, best_moves, prev_zh.clone())),depth));
-                        }
+                        break;
                     }
                 }
             }
         }
 
-        best_moves.push_front(prev_move);
-        Ok(EvaluationResult::Immediate(scoreval, best_moves,gs.zh.clone()))
+        if best_moves.is_empty() {
+            Ok(EvaluationResult::Timeout)
+        } else {
+            best_moves.push_front(prev_move);
+
+            Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()))
+        }
     }
 }

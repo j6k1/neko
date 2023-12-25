@@ -270,7 +270,7 @@ impl USIPlayer<ApplicationError> for Neko {
                 let _ = env.on_error_handler.lock().map(|h| h.call(e));
                 BestMove::Resign
             },
-            Ok(EvaluationResult::Timeout(_,_)) => {
+            Ok(EvaluationResult::Timeout) => {
                 BestMove::Resign
             },
             Ok(EvaluationResult::Immediate(Score::NEGINFINITE,_,_)) => {
