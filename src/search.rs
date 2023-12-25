@@ -640,7 +640,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             let s = -s;
 
-                            if s > scoreval || s == Score::INFINITE {
+                            if s > scoreval {
                                 scoreval = s;
 
                                 best_moves = mvs;
