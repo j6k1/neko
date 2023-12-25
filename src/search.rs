@@ -389,7 +389,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             }
                         }
 
-                        if env.stop.load(atomic::Ordering::Acquire) {
+                        if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                             is_timeout = true;
                             break;
                         }
@@ -403,7 +403,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 let event_queue = Arc::clone(&env.event_queue);
                 event_dispatcher.dispatch_events(self, &*event_queue)?;
 
-                if env.stop.load(atomic::Ordering::Acquire) {
+                if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                     is_timeout = true;
                     break;
                 }
@@ -515,7 +515,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                _ if env.stop.load(Ordering::Acquire) || base_depth + 1 == depth => {
+                _ if env.stop.load(Ordering::Acquire) || self.timelimit_reached(env) || base_depth + 1 == depth => {
                     return Ok(result.unwrap_or(EvaluationResult::Timeout));
                 },
                 _ => ()
@@ -664,7 +664,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     event_dispatcher.dispatch_events(self, &*env.event_queue)?;
 
-                    if env.abort.load(Ordering::Acquire) || env.stop.load(atomic::Ordering::Acquire) {
+                    if env.abort.load(Ordering::Acquire) ||
+                       env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                         return Ok(EvaluationResult::Timeout);
                     }
                 }
