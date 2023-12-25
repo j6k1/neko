@@ -318,7 +318,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         if let Some(e) = last_error {
             e
-        } else if is_timeout && best_moves.is_empty() {
+        } else if is_timeout {
             Ok(EvaluationResult::Timeout)
         } else {
             Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
