@@ -477,7 +477,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             }
         }
 
-        if scoreval == Score::NEGINFINITE && is_timeout {
+        if scoreval == Score::NEGINFINITE && !is_timeout {
             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
         }
 
