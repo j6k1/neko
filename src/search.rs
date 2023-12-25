@@ -559,7 +559,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
             mvs.push_front(prev_move);
 
-            return Ok(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone()));
+            return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone()));
         }
 
         if Rule::is_mate(gs.teban,&gs.state) {
