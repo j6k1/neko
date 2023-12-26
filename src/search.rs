@@ -276,60 +276,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         event_dispatcher
     }
 
-    pub fn termination<'a,'b>(&self,
-                              env:&mut Environment<L,S>,
-                              gs: &mut GameState<'a>,
-                              score:Score,
-                              is_timeout:bool,
-                              max_threads:u32,
-                              mut threads:u32,
-                              mut best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError> {
-        env.abort.store(true,Ordering::Release);
-
-        let mut score = score;
-        let mut last_error = None;
-
-        while threads < max_threads {
-            match self.receiver.recv().map_err(|e| ApplicationError::from(e)).and_then(|r| r) {
-                Ok(EvaluationResult::Immediate(s,mvs,zh)) => {
-                    self.update_tt(env,&zh,gs.depth,s);
-
-                    if -s > score {
-                        score = -s;
-                        best_moves = mvs;
-
-                        self.update_best_move(env,&gs.zh,gs.depth, score, best_moves.front().cloned());
-
-                        if let Err(e) =  self.send_info(env, gs.base_depth,gs.current_depth,&best_moves,&score) {
-                            last_error = Some(Err(e));
-                        }
-                    }
-                    threads += 1;
-                },
-                e @ Err(_) => {
-                    threads += 1;
-                    last_error = Some(e);
-                }
-                _ => {
-                    threads += 1;
-                }
-            }
-        }
-
-        if let Some(e) = last_error {
-            e
-        } else if is_timeout && gs.depth > 1 {
-            Ok(EvaluationResult::Timeout)
-        } else {
-            Ok(EvaluationResult::Immediate(score, best_moves,gs.zh.clone()))
-        }
-    }
-
     fn parallelized<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                            event_dispatcher:&mut UserEventDispatcher<'b,Root<L,S>,ApplicationError,L>,
                            evalutor: &Arc<Evalutor>,
                            best_moves:VecDeque<LegalMove>) -> Result<EvaluationResult,ApplicationError>  {
-        let mut gs = gs;
         let mut best_moves = best_moves;
 
         let mut mvs = Rule::legal_moves_all(gs.teban,&gs.state,&gs.mc);
@@ -350,7 +300,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
         let mvs_count = mvs.len() as u64;
 
-        let mut threads = env.max_threads.min(mvs_count as u32);
+        let threads = env.max_threads.min(mvs_count as u32);
+        let mut busy_threads = 0;
         let mut force_recv = false;
 
         let sender = self.sender.clone();
@@ -358,12 +309,12 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let mut it = mvs.into_iter();
 
         loop {
-            if threads == 0 || force_recv {
+            if busy_threads > 0 && (busy_threads == threads || force_recv) {
                 let r = self.receiver.recv();
 
                 let r = r?.map_err(|e| ApplicationError::from(e))?;
 
-                threads += 1;
+                busy_threads -= 1;
 
                 match r {
                     EvaluationResult::Immediate(s, mvs,zh) => {
@@ -395,7 +346,6 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
                     },
                     EvaluationResult::Timeout => {
-                        is_timeout = true;
                         break;
                     }
                 }
@@ -467,13 +417,13 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             let _ = sender.send(r);
                         });
 
-                        threads -= 1;
+                        busy_threads += 1;
                     }
                 }
-            } else if threads == env.max_threads.min(mvs_count as u32) {
-                force_recv = true;
-            } else {
+            } else if busy_threads == 0 {
                 break;
+            } else {
+                force_recv = true;
             }
         }
 
@@ -481,7 +431,11 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
         }
 
-        self.termination(env, &mut gs,scoreval,is_timeout, env.max_threads.min(mvs_count as u32), threads, best_moves)
+        if is_timeout && gs.depth > 1 {
+            Ok(EvaluationResult::Timeout)
+        } else {
+            Ok(EvaluationResult::Immediate(scoreval, best_moves,gs.zh.clone()))
+        }
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -505,17 +459,14 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             depth += 1;
 
             match current_result {
-                EvaluationResult::Immediate(s,mvs,zh) if base_depth + 1 == depth && mvs.len() > 0 => {
+                EvaluationResult::Immediate(s,mvs,zh) if base_depth + 1 == depth => {
                     return Ok(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Immediate(_,_,_) if base_depth + 1 == depth => {
-                    return Ok(result.unwrap_or(EvaluationResult::Timeout));
-                },
-                EvaluationResult::Immediate(s,mvs,zh) if mvs.len() > 0 => {
+                EvaluationResult::Immediate(s,mvs,zh) => {
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                _ if env.stop.load(Ordering::Acquire) || self.timelimit_reached(env) || base_depth + 1 == depth => {
+                EvaluationResult::Timeout if base_depth + 1 == depth => {
                     return Ok(result.unwrap_or(EvaluationResult::Timeout));
                 },
                 _ => ()
