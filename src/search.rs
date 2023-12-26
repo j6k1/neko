@@ -346,7 +346,10 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                         }
                     },
                     EvaluationResult::Timeout => {
-                        break;
+                        if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
+                            is_timeout = true;
+                            break;
+                        }
                     }
                 }
 
