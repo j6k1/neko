@@ -332,7 +332,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                             self.update_best_move(env,&gs.zh,gs.depth,scoreval,best_moves.front().cloned());
 
                             if scoreval >= beta {
-                                break;
+                                env.abort.store(true,Ordering::Release);
+                                continue;
                             }
 
                             if alpha < scoreval {
@@ -342,14 +343,17 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                         if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                             is_timeout = true;
-                            break;
+                            env.abort.store(true,Ordering::Release);
+                            continue;
                         }
                     },
                     EvaluationResult::Timeout => {
                         if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                             is_timeout = true;
-                            break;
                         }
+
+                        env.abort.store(true,Ordering::Release);
+                        continue;
                     }
                 }
 
@@ -358,7 +362,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 if env.stop.load(atomic::Ordering::Acquire) || self.timelimit_reached(env) {
                     is_timeout = true;
-                    break;
+                    env.abort.store(true,Ordering::Release);
+                    continue;
                 }
             } else if let Some(m) = it.next() {
                 let o = match m {
@@ -469,10 +474,9 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     best_moves = mvs.clone();
                     result = Some(EvaluationResult::Immediate(s,mvs,zh));
                 },
-                EvaluationResult::Timeout if base_depth + 1 == depth => {
+                EvaluationResult::Timeout => {
                     return Ok(result.unwrap_or(EvaluationResult::Timeout));
-                },
-                _ => ()
+                }
             }
         }
     }
