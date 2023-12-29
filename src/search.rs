@@ -201,13 +201,19 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn update_tt<'a>(&self, env: &mut Environment<L, S>,
                      zh: &'a ZobristHash<u64>,
                      depth: u32,
-                     score: Score) {
+                     score: Score,
+                     beta: Score,
+                     alpha:Score) {
         let mut tte = env.transposition_table.entry(&zh);
         let tte = tte.or_default();
 
-        if tte.depth < depth as i8 - 1 || (tte.depth == depth as i8 - 1 && tte.score < score) {
+        if (tte.beta >= beta && tte.alpha <= alpha) && (
+            tte.depth < depth as i8 - 1 || (tte.depth == depth as i8 - 1 && tte.score < score)
+        ) {
             tte.depth = depth as i8 - 1;
             tte.score = score;
+            tte.beta = beta;
+            tte.alpha = alpha;
         }
     }
 
@@ -215,13 +221,17 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                             zh: &'a ZobristHash<u64>,
                             depth: u32,
                             score:Score,
+                            beta:Score,
+                            alpha:Score,
                             m: Option<LegalMove>) {
         let mut tte = env.transposition_table.entry(zh);
         let tte = tte.or_default();
 
-        if tte.depth < depth as i8 || (tte.depth == depth as i8 && tte.score < score) {
+        if (tte.beta >= beta && tte.alpha <= alpha) && (tte.depth < depth as i8 || (tte.depth == depth as i8 && tte.score < score)) {
             tte.depth = depth as i8;
             tte.score = score;
+            tte.beta = beta;
+            tte.alpha = alpha;
             tte.best_move = m;
         }
     }
@@ -287,6 +297,8 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         if let Some(TTPartialEntry {
                         depth: _,
                         score: _,
+                        beta: _,
+                        alpha: _,
                         best_move: m
                     }) = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone()) {
             m.map(|m| mvs.insert(0,m));
@@ -318,7 +330,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                 match r {
                     EvaluationResult::Immediate(s, mvs,zh) => {
-                        self.update_tt(env,&zh,gs.depth,s);
+                        self.update_tt(env,&zh,gs.depth,s,-alpha,-beta);
 
                         let s = -s;
 
@@ -329,7 +341,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
-                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,best_moves.front().cloned());
+                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,beta,alpha,best_moves.front().cloned());
 
                             if scoreval >= beta {
                                 env.abort.store(true,Ordering::Release);
@@ -543,6 +555,8 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         if let Some(TTPartialEntry {
                         depth: _,
                         score: _,
+                        beta: _,
+                        alpha: _,
                         best_move: m
                     }) = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone()) {
             m.map(|m| mvs.insert(0,m));
@@ -594,7 +608,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                     match strategy.search(env, &mut gs, event_dispatcher, evalutor)? {
                         EvaluationResult::Immediate(s, mvs, zh) => {
-                            self.update_tt(env,&zh,gs.depth,s);
+                            self.update_tt(env,&zh,gs.depth,s,-alpha,-beta);
 
                             let s = -s;
 
@@ -603,7 +617,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                 best_moves = mvs;
 
-                                self.update_best_move(env,&prev_zh,d,scoreval,Some(m));
+                                self.update_best_move(env,&prev_zh,d,scoreval,beta,alpha,Some(m));
 
                                 if scoreval >= beta {
                                     best_moves.push_front(prev_move);
