@@ -4,7 +4,7 @@ use std::ops::{Add, Deref, Neg, Sub};
 use std::sync::{Arc, atomic, mpsc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::time::{Instant};
+use std::time::{Duration, Instant};
 use usiagent::command::{UsiInfoSubCommand, UsiScore, UsiScoreMate};
 use usiagent::error::EventHandlerError;
 use usiagent::event::{EventDispatcher, MapEventKind, UserEvent, UserEventDispatcher, UserEventKind, UserEventQueue, USIEventDispatcher};
@@ -72,6 +72,7 @@ pub struct Environment<L,S> where L: Logger, S: InfoSender {
     pub info_sender:S,
     pub on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
     pub hasher:Arc<KyokumenHash<u64>>,
+    pub limit:Option<Instant>,
     pub turn_limit:Option<Instant>,
     pub base_depth:u32,
     pub max_depth:u32,
@@ -89,6 +90,7 @@ impl<L,S> Clone for Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:self.info_sender.clone(),
             on_error_handler:Arc::clone(&self.on_error_handler),
             hasher:Arc::clone(&self.hasher),
+            limit:self.limit.clone(),
             turn_limit:self.turn_limit.clone(),
             base_depth:self.base_depth,
             max_depth:self.max_depth,
@@ -111,6 +113,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
                info_sender:S,
                on_error_handler:Arc<Mutex<OnErrorHandler<L>>>,
                hasher:Arc<KyokumenHash<u64>>,
+               limit:Option<Instant>,
                turn_limit:Option<Instant>,
                base_depth:u32,
                max_depth:u32,
@@ -126,6 +129,7 @@ impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
             info_sender:info_sender,
             on_error_handler:on_error_handler,
             hasher:hasher,
+            limit:limit,
             turn_limit:turn_limit,
             base_depth:base_depth,
             max_depth:max_depth,
@@ -157,12 +161,14 @@ pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     receiver:Receiver<Result<EvaluationResult, ApplicationError>>,
     sender:Sender<Result<EvaluationResult, ApplicationError>>
 }
+const TIMELIMIT_MARGIN:u64 = 50;
+
 pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
     fn search<'a,'b>(&self,env:&mut Environment<L,S>, gs:&mut GameState<'a>,
                      event_dispatcher:&mut UserEventDispatcher<'b,Self,ApplicationError,L>,
                      evalutor: &Arc<Evalutor>) -> Result<EvaluationResult,ApplicationError>;
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
-        env.turn_limit.map(|l| Instant::now() >= l).unwrap_or(false)
+        env.turn_limit.map(|l| l - Instant::now() <= Duration::from_millis(TIMELIMIT_MARGIN)).unwrap_or(false)
     }
 
     fn send_info(&self, env:&mut Environment<L,S>,
@@ -341,7 +347,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
                             self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
 
-                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,beta,alpha,best_moves.front().cloned());
+                            self.update_best_move(env,&gs.zh,gs.depth,scoreval,beta,gs.alpha,best_moves.front().cloned());
 
                             if scoreval >= beta {
                                 env.abort.store(true,Ordering::Release);
@@ -519,6 +525,44 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             "move is not set."
         )))?;
 
+        {
+            let r = env.transposition_table.get(&gs.zh).map(|tte| tte.deref().clone());
+
+            if let Some(TTPartialEntry {
+                            depth: d,
+                            score: s,
+                            beta,
+                            alpha,
+                            best_move: _
+                        }) = r {
+
+                match s {
+                    Score::INFINITE => {
+                        let mut mvs = VecDeque::new();
+
+                        mvs.push_front(prev_move);
+
+                        return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone()));
+                    },
+                    Score::NEGINFINITE => {
+                        let mut mvs = VecDeque::new();
+
+                        mvs.push_front(prev_move);
+
+                        return Ok(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone()));
+                    },
+                    Score::Value(s) if d as u32 >= gs.depth && beta >= gs.beta && alpha <= gs.alpha => {
+                        let mut mvs = VecDeque::new();
+
+                        mvs.push_front(prev_move);
+
+                        return Ok(EvaluationResult::Immediate(Score::Value(s),mvs,gs.zh.clone()));
+                    },
+                    _ => ()
+                }
+            }
+        }
+
         let obtained = match prev_move {
             LegalMove::To(m) => m.obtained(),
             _ => None
@@ -562,6 +606,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
             m.map(|m| mvs.insert(0,m));
         }
 
+        let start_alpha = gs.alpha;
         let mut alpha = gs.alpha;
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
@@ -617,7 +662,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                 best_moves = mvs;
 
-                                self.update_best_move(env,&prev_zh,d,scoreval,beta,alpha,Some(m));
+                                self.update_best_move(env,&prev_zh,d,scoreval,beta,start_alpha,Some(m));
 
                                 if scoreval >= beta {
                                     best_moves.push_front(prev_move);

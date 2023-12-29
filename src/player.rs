@@ -192,7 +192,7 @@ impl USIPlayer<ApplicationError> for Neko {
     }
 
     fn think<L,S,P>(&mut self,think_start_time:Instant,
-                    _:&UsiGoTimeLimit,event_queue:Arc<Mutex<UserEventQueue>>,
+                    limit:&UsiGoTimeLimit,event_queue:Arc<Mutex<UserEventQueue>>,
                     info_sender:S,periodically_info:P,on_error_handler:Arc<Mutex<OnErrorHandler<L>>>)
                     -> Result<BestMove,ApplicationError>
         where L: Logger + Send + 'static,
@@ -203,11 +203,14 @@ impl USIPlayer<ApplicationError> for Neko {
                 String::from("Position information is not initialized."))
         )?;
 
+        let limit = limit.to_instant(teban,think_start_time);
+
         let mut env = Environment::new(
             Arc::clone(&event_queue),
             info_sender.clone(),
             Arc::clone(&on_error_handler),
             Arc::clone(&self.hasher),
+            limit,
             self.turn_limit.map(|l| think_start_time + Duration::from_millis(l as u64)),
             self.base_depth,
             self.max_depth,
