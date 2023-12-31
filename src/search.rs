@@ -190,6 +190,8 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
             return alpha;
         }
 
+        let mut bestscore = Score::NEGINFINITE;
+
         for m in mvs {
             if let Some(ObtainKind::Ou) = match m {
                 LegalMove::To(m) => m.obtained(),
@@ -206,12 +208,16 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                 return score;
             }
 
+            if score > bestscore {
+                bestscore = score;
+            }
+
             if score > alpha {
                 alpha = score;
             }
         }
 
-        alpha
+        bestscore
     }
 
     fn timelimit_reached(&self,env:&mut Environment<L,S>) -> bool {
@@ -616,14 +622,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         };
 
         if let Some(ObtainKind::Ou) = obtained {
-            let mut mvs = VecDeque::new();
-
-            mvs.push_front(prev_move);
-
-            return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone()));
-        }
-
-        if Rule::is_mate(gs.teban,&gs.state) {
             let mut mvs = VecDeque::new();
 
             mvs.push_front(prev_move);
