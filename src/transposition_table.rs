@@ -413,7 +413,7 @@ impl<K,T,const S:usize,const N:usize> TT<K,T,S,N>
 
                 Entry::VacantTTEntry(
                     VacantTTEntry::new(
-              WriteGuard::new(bucket, index),
+                        WriteGuard::new(bucket, index),
                         zh.mhash,
                         zh.shash,
                         zh.teban
