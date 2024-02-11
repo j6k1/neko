@@ -286,9 +286,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut tte = env.transposition_table.entry(&zh);
         let tte = tte.or_default();
 
-        if (tte.beta >= beta && tte.alpha <= alpha) && (
-            tte.depth < depth as i8 - 1 || (tte.depth == depth as i8 - 1 && tte.score < score)
-        ) {
+        if tte.score == Score::NEGINFINITE || score == Score::INFINITE ||
+            (tte.beta >= beta && tte.alpha <= alpha && tte.depth < depth as i8 - 1) ||
+            (tte.depth == depth as i8 - 1 && tte.score < score) {
             tte.depth = depth as i8 - 1;
             tte.score = score;
             tte.beta = beta;
@@ -306,7 +306,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut tte = env.transposition_table.entry(zh);
         let tte = tte.or_default();
 
-        if (tte.beta >= beta && tte.alpha <= alpha) && (tte.depth < depth as i8 || (tte.depth == depth as i8 && tte.score < score)) {
+        if tte.score == Score::NEGINFINITE || score == Score::INFINITE ||
+            (tte.beta >= beta && tte.alpha <= alpha && tte.depth < depth as i8) ||
+            (tte.depth == depth as i8 && tte.score < score) {
             tte.depth = depth as i8;
             tte.score = score;
             tte.beta = beta;
@@ -537,6 +539,14 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
         match next {
             (state, mc, _) => {
                 let state = Arc::new(state);
+
+                if Rule::is_mate(gs.teban.opposite(),&state) {
+                    let mut mvs = VecDeque::new();
+                    mvs.push_front(m);
+
+                    return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,zh));
+                }
+
                 let mc = Arc::new(mc);
 
                 let mut gs = GameState {
@@ -691,6 +701,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                         }
                     }
                 }
+
                 continue;
             } else if i == 1 {
                 Rule::legal_moves_all_by_strategy::<CaptureOrPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
