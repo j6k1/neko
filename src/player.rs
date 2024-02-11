@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use rayon::ThreadPoolBuilder;
 use usiagent::command::{BestMove, CheckMate, UsiInfoSubCommand, UsiOptType};
 use usiagent::error::{PlayerError, UsiProtocolError};
 use usiagent::event::{GameEndState, SysEventOption, SysEventOptionKind, UserEvent, UserEventQueue, UsiGoMateTimeLimit, UsiGoTimeLimit};
@@ -15,7 +16,7 @@ use usiagent::rule::{AppliedMove, Kyokumen, State};
 use usiagent::shogi::{Banmen, Mochigoma, MochigomaCollections, Move, Teban};
 use crate::error::ApplicationError;
 use crate::evalutor::Evalutor;
-use crate::search::{BASE_DEPTH, Environment, EvaluationResult, GameState, MAX_DEPTH, MAX_THREADS, Root, Score, Search, TURN_LIMIT};
+use crate::search::{BASE_DEPTH, Environment, EvaluationResult, FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD, GameState, MAX_DEPTH, MAX_THREADS, NODES_PER_LEAF_NODE, Root, Score, Search, TURN_LIMIT};
 use crate::transposition_table::{TT, ZobristHash};
 
 pub trait FromOption {
@@ -33,6 +34,22 @@ impl FromOption for u32 {
     fn from_option(option: SysEventOption) -> Option<u32> {
         match option {
             SysEventOption::Num(v) => Some(v as u32),
+            _ => None
+        }
+    }
+}
+impl FromOption for u16 {
+    fn from_option(option: SysEventOption) -> Option<u16> {
+        match option {
+            SysEventOption::Num(v) => Some(v as u16),
+            _ => None
+        }
+    }
+}
+impl FromOption for u8 {
+    fn from_option(option: SysEventOption) -> Option<u8> {
+        match option {
+            SysEventOption::Num(v) => Some(v as u8),
             _ => None
         }
     }
@@ -62,6 +79,8 @@ pub struct Neko {
     base_depth:u32,
     max_depth:u32,
     max_threads:u32,
+    factor_nodes_per_thread:u8,
+    nodes_per_leaf_node:u16,
     turn_limit:Option<u32>,
 }
 impl fmt::Debug for Neko {
@@ -80,6 +99,8 @@ impl Neko {
             base_depth:BASE_DEPTH,
             max_depth:MAX_DEPTH,
             max_threads:MAX_THREADS,
+            factor_nodes_per_thread:FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD,
+            nodes_per_leaf_node:NODES_PER_LEAF_NODE,
             turn_limit:None,
         }
     }
@@ -96,6 +117,8 @@ impl USIPlayer<ApplicationError> for Neko {
         kinds.insert(String::from("Threads"),SysEventOptionKind::Num);
         kinds.insert(String::from("BaseDepth"),SysEventOptionKind::Num);
         kinds.insert(String::from("TurnLimit"),SysEventOptionKind::Num);
+        kinds.insert(String::from("FactorForNumberOfNodesPerThread"),SysEventOptionKind::Num);
+        kinds.insert(String::from("NodesPerLeafNodes"),SysEventOptionKind::Num);
 
         Ok(kinds)
     }
@@ -106,6 +129,10 @@ impl USIPlayer<ApplicationError> for Neko {
         options.insert(String::from("MaxDepth"),UsiOptType::Spin(1,100,Some(MAX_DEPTH as i64)));
         options.insert(String::from("Threads"),UsiOptType::Spin(1,1024,Some(MAX_THREADS as i64)));
         options.insert(String::from("TurnLimit"),UsiOptType::Spin(1,3600000,Some(TURN_LIMIT as i64)));
+        options.insert(String::from("FactorForNumberOfNodesPerThread"),
+        UsiOptType::Spin(1,255,Some(FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD as i64))
+        );
+        options.insert(String::from("NodesPerLeafNodes"), UsiOptType::Spin(1,593,Some(NODES_PER_LEAF_NODE as i64)));
 
         Ok(options)
     }
@@ -129,6 +156,12 @@ impl USIPlayer<ApplicationError> for Neko {
             },
             "TurnLimit" => {
                 self.turn_limit = u32::from_option(value);
+            },
+            "FactorForNumberOfNodesPerThread" => {
+                self.factor_nodes_per_thread = u8::from_option(value).unwrap_or(FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD);
+            },
+            "NodesPerLeafNodes" => {
+                self.nodes_per_leaf_node = u16::from_option(value).unwrap_or(NODES_PER_LEAF_NODE);
             },
             _ => ()
         }
@@ -215,6 +248,8 @@ impl USIPlayer<ApplicationError> for Neko {
             self.base_depth,
             self.max_depth,
             self.max_threads,
+            self.factor_nodes_per_thread,
+            self.nodes_per_leaf_node,
             &self.transposition_table
         );
 
@@ -248,9 +283,12 @@ impl USIPlayer<ApplicationError> for Neko {
             }
         };
 
+        let mut rng = rand::thread_rng();
+
         let mut gs = GameState {
             teban: teban,
             state: &Arc::new(state.clone()),
+            rng:&mut rng,
             alpha: Score::NEGINFINITE,
             beta: Score::INFINITE,
             m:None,
@@ -262,7 +300,9 @@ impl USIPlayer<ApplicationError> for Neko {
             max_depth:env.max_depth
         };
 
-        let strategy  = Root::new();
+        let strategy  = Root::new(ThreadPoolBuilder::new()
+                                                            .num_threads(self.max_threads as usize)
+                                                            .stack_size(1024 * 1024 * 200).build()?);
 
         let evalutor = Arc::clone(&self.evalutor);
 

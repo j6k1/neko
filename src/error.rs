@@ -1,6 +1,7 @@
 use std::{error, fmt};
 use std::sync::mpsc::RecvError;
-use usiagent::error::{EventDispatchError, InfoSendError, PlayerError, UsiProtocolError};
+use rayon::ThreadPoolBuildError;
+use usiagent::error::{EventDispatchError, InfoSendError, LimitSizeError, PlayerError, UsiProtocolError};
 use usiagent::event::{EventQueue, UserEvent, UserEventKind};
 
 #[derive(Debug)]
@@ -11,7 +12,9 @@ pub enum ApplicationError {
     EventDispatchError(String),
     InfoSendError(InfoSendError),
     RecvError(RecvError),
+    ThreadPoolBuildError(ThreadPoolBuildError),
     UsiProtocolError(UsiProtocolError),
+    LimitSizeError(LimitSizeError)
 }
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -22,7 +25,9 @@ impl fmt::Display for ApplicationError {
             ApplicationError::EventDispatchError(ref s) => write!(f,"{}",s),
             ApplicationError::InfoSendError(ref e) => write!(f,"{}",e),
             ApplicationError::RecvError(ref e) => write!(f, "{}",e),
+            ApplicationError::ThreadPoolBuildError(ref e) => write!(f,"{}",e),
             ApplicationError::UsiProtocolError(ref e) => write!(f,"{}",e),
+            ApplicationError::LimitSizeError(ref e) => write!(f,"{}",e)
         }
     }
 }
@@ -35,7 +40,9 @@ impl error::Error for ApplicationError {
             ApplicationError::EventDispatchError(_) => "An error occurred while processing the event.",
             ApplicationError::InfoSendError(_) => "An error occurred when sending info command.",
             ApplicationError::RecvError(_) => "An error occurred while receiving the message.",
+            ApplicationError::ThreadPoolBuildError(_) => "Failed to create thread pool.",
             ApplicationError::UsiProtocolError(_) => "An error occurred in the parsing or string generation process of string processing according to the USI protocol.",
+            ApplicationError::LimitSizeError(_) => "Size exceeds the upper limit."
         }
     }
 
@@ -47,7 +54,9 @@ impl error::Error for ApplicationError {
             ApplicationError::EventDispatchError(_) => None,
             ApplicationError::InfoSendError(ref e) => Some(e),
             ApplicationError::RecvError(ref e) => Some(e),
+            ApplicationError::ThreadPoolBuildError(ref e) => Some(e),
             ApplicationError::UsiProtocolError(ref e) => Some(e),
+            ApplicationError::LimitSizeError(ref e) => Some(e),
         }
     }
 }
@@ -67,8 +76,18 @@ impl From<RecvError> for ApplicationError {
         ApplicationError::RecvError(err)
     }
 }
+impl From<ThreadPoolBuildError> for ApplicationError {
+    fn from(err: ThreadPoolBuildError) -> ApplicationError {
+        ApplicationError::ThreadPoolBuildError(err)
+    }
+}
 impl From<InfoSendError> for ApplicationError {
     fn from(err: InfoSendError) -> ApplicationError {
         ApplicationError::InfoSendError(err)
+    }
+}
+impl From<LimitSizeError> for ApplicationError {
+    fn from(err: LimitSizeError) -> ApplicationError {
+        ApplicationError::LimitSizeError(err)
     }
 }

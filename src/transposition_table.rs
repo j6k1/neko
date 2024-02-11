@@ -149,7 +149,7 @@ impl<'a,T,K,const N:usize> WriteGuard<'a,T,K,N> where K: Eq, T: Default + Neg<Ou
     }
 
     fn remove(&mut self) -> TTPartialEntry<T> {
-        let mut e = self.locked_bucket.deref_mut().index_mut(self.index);
+        let e = self.locked_bucket.deref_mut().index_mut(self.index);
 
         e.used = false;
 

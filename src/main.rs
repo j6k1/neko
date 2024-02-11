@@ -3,6 +3,7 @@ extern crate rand_distr;
 extern crate rand_xorshift;
 extern crate statrs;
 extern crate parking_lot;
+extern crate rayon;
 
 extern crate usiagent;
 extern crate core;

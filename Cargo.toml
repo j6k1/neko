@@ -1,6 +1,6 @@
 [package]
 name = "neko"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,5 +11,6 @@ rand_xorshift = "0.3.0"
 statrs = "0.16.0"
 rand_distr = "0.4.3"
 parking_lot = "0.12.1"
+rayon = "1.8.1"
 [dependencies.usiagent]
 path = "../USIAgent"
