@@ -410,7 +410,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let mut depth = 1;
         let mut thread_index = 0;
         let nodes_per_thread:u128 = env.nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128 * 2 / env.max_threads as u128;
-        let mut search_space:u128 = env.nodes_per_leaf_node as u128 * 4 * nodes_per_thread as u128 / env.nodes_per_leaf_node as u128;
+        let mut search_space:u128 = env.nodes_per_leaf_node as u128 * 4;
         let mut busy_thread = 0;
         let mut result = None;
 
@@ -443,7 +443,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             } else {
                 if depth < base_depth && thread_index * nodes_per_thread >= search_space {
                     depth += 1;
-                    search_space = search_space * nodes_per_thread;
+                    search_space = search_space * env.nodes_per_leaf_node as u128;
                 }
 
                 gs.depth = depth;
