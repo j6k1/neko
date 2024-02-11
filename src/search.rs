@@ -628,7 +628,6 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
         let beta = gs.beta;
         let mut scoreval = Score::NEGINFINITE;
         let mut best_moves = VecDeque::new();
-        let prev_zh = gs.zh.clone();
 
         let mut picker = RandomPicker::new(Prng::new(gs.rng.gen()));
 
@@ -657,11 +656,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                                         self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
                                     }
 
-                                    self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta, start_alpha, Some(m));
+                                    self.update_best_move(env, &gs.zh, gs.depth, scoreval, beta, start_alpha, Some(m));
 
                                     if scoreval >= beta {
                                         prev_move.map(|m| best_moves.push_front(m));
-                                        return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                                        return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                                     }
                                 }
 
@@ -694,7 +693,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             best_moves = mvs;
 
-                            self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta, start_alpha, Some(m));
+                            self.update_best_move(env, &gs.zh, gs.depth, scoreval, beta, start_alpha, Some(m));
 
                             if s > gs.best_score && gs.current_depth == 1 {
                                 self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
@@ -702,7 +701,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             if scoreval >= beta {
                                 prev_move.map(|m| best_moves.push_front(m));
-                                return Ok(EvaluationResult::Immediate(scoreval, best_moves, prev_zh.clone()));
+                                return Ok(EvaluationResult::Immediate(scoreval, best_moves, gs.zh.clone()));
                             }
                         }
 
