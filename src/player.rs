@@ -291,6 +291,7 @@ impl USIPlayer<ApplicationError> for Neko {
             rng:&mut rng,
             alpha: Score::NEGINFINITE,
             beta: Score::INFINITE,
+            best_score: Score::NEGINFINITE,
             m:None,
             mc: &Arc::new(mc.clone()),
             zh:zh,

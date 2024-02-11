@@ -163,6 +163,7 @@ pub struct GameState<'a> {
     pub rng:&'a mut ThreadRng,
     pub alpha:Score,
     pub beta:Score,
+    pub best_score:Score,
     pub m:Option<LegalMove>,
     pub mc:&'a Arc<MochigomaCollections>,
     pub zh:ZobristHash<u64>,
@@ -373,6 +374,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
         let current_depth = 0;
         let base_depth = gs.base_depth;
         let max_depth = gs.max_depth;
+        let best_score = gs.best_score;
 
         self.thread_pool.spawn(move || {
             let mut event_dispatcher = Self::create_event_dispatcher::<Recursive<L, S>>(&env.on_error_handler, &env.stop, &env.quited);
@@ -384,6 +386,7 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
                 state: &state,
                 alpha: Score::NEGINFINITE,
                 beta: Score::INFINITE,
+                best_score: best_score,
                 m: None,
                 mc: &mc,
                 zh: zh,
@@ -433,6 +436,11 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                     },
                     Ok(EvaluationResult::Immediate(s, mvs, zh)) => {
                         busy_thread -= 1;
+
+                        if s > gs.best_score {
+                            gs.best_score = s;
+                        }
+
                         result = Some(EvaluationResult::Immediate(s, mvs, zh));
                     },
                     Ok(EvaluationResult::Timeout) => {
@@ -520,6 +528,7 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
                     rng: gs.rng,
                     alpha: -gs.beta,
                     beta: -alpha,
+                    best_score: gs.best_score,
                     m: Some(m),
                     mc: &mc,
                     zh: zh.clone(),
@@ -644,6 +653,10 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                     best_moves = mvs;
 
+                                    if s > gs.best_score && gs.current_depth == 1 {
+                                        self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
+                                    }
+
                                     self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta, start_alpha, Some(m));
 
                                     if scoreval >= beta {
@@ -683,7 +696,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             self.update_best_move(env, &prev_zh, gs.depth, scoreval, beta, start_alpha, Some(m));
 
-                            if gs.current_depth == 1 {
+                            if s > gs.best_score && gs.current_depth == 1 {
                                 self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
                             }
 
