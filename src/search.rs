@@ -409,7 +409,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let base_depth = gs.depth.min(env.base_depth);
         let mut depth = 1;
         let mut thread_index = 0;
-        let nodes_per_thread:u128 = env.nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128 * 2 / env.max_threads as u128;
+        let nodes_per_thread:u128 = env.nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128;
         let mut search_space:u128 = env.nodes_per_leaf_node as u128 * 4;
         let mut busy_thread = 0;
         let mut result = None;
@@ -420,6 +420,15 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             if busy_thread == env.max_threads {
                 match self.receiver.recv().map_err(|e| ApplicationError::from(e))? {
                     Ok(EvaluationResult::Immediate(s, mvs, zh)) if base_depth <= depth => {
+                        busy_thread -= 1;
+
+                        env.abort.store(true,Ordering::Release);
+
+                        while busy_thread > 0 {
+                            let _ = self.receiver.recv()?;
+                            busy_thread -= 1;
+                        }
+
                         return Ok(EvaluationResult::Immediate(s, mvs, zh));
                     },
                     Ok(EvaluationResult::Immediate(s, mvs, zh)) => {
@@ -427,10 +436,21 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
                         result = Some(EvaluationResult::Immediate(s, mvs, zh));
                     },
                     Ok(EvaluationResult::Timeout) => {
+                        busy_thread -= 1;
+
+                        env.abort.store(true,Ordering::Release);
+
+                        while busy_thread > 0 {
+                            let _ = self.receiver.recv()?;
+                            busy_thread -= 1;
+                        }
+
                         return Ok(result.unwrap_or(EvaluationResult::Timeout));
                     },
                     Err(e) => {
                         busy_thread -= 1;
+
+                        env.abort.store(true,Ordering::Release);
 
                         while busy_thread > 0 {
                             let _ = self.receiver.recv()?;
