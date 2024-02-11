@@ -119,6 +119,11 @@ pub enum EvaluationResult {
     Immediate(Score, VecDeque<LegalMove>, ZobristHash<u64>),
     Timeout
 }
+#[derive(Debug)]
+pub enum RootEvaluationResult {
+    Immediate(Score, VecDeque<LegalMove>, ZobristHash<u64>, u32),
+    Timeout
+}
 impl<L,S> Environment<L,S> where L: Logger, S: InfoSender {
     pub fn new(event_queue:Arc<Mutex<UserEventQueue>>,
                info_sender:S,
@@ -175,8 +180,8 @@ pub struct GameState<'a> {
 pub struct Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
     l:PhantomData<L>,
     s:PhantomData<S>,
-    receiver:Receiver<Result<EvaluationResult, ApplicationError>>,
-    sender:Sender<Result<EvaluationResult, ApplicationError>>,
+    receiver:Receiver<Result<RootEvaluationResult, ApplicationError>>,
+    sender:Sender<Result<RootEvaluationResult, ApplicationError>>,
     thread_pool:ThreadPool
 }
 const TIMELIMIT_MARGIN:u64 = 50;
@@ -401,8 +406,30 @@ impl<L,S> Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
 
             let r = strategy.search(&mut env, &mut gs, &mut event_dispatcher, &evalutor);
 
-            let _ = sender.send(r);
+            match r {
+                Ok(EvaluationResult::Immediate(score,mvs,zh)) => {
+                    let _ = sender.send(Ok(RootEvaluationResult::Immediate(score,mvs,zh,depth)));
+                },
+                Ok(EvaluationResult::Timeout) => {
+                    let _ = sender.send(Ok(RootEvaluationResult::Timeout));
+                },
+                Err(e) => {
+                    let _ = sender.send(Err(e));
+                }
+            }
         });
+    }
+
+    fn termination(&self,env:&mut Environment<L,S>,mut busy_threads:u32) -> Result<(),ApplicationError> {
+        env.abort.store(true,Ordering::Release);
+
+        while busy_threads > 0 {
+            self.receiver.recv().map_err(|e| ApplicationError::from(e))??;
+
+            busy_threads -= 1;
+        }
+
+        Ok(())
     }
 }
 impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSender {
@@ -414,56 +441,46 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let mut thread_index = 0;
         let nodes_per_thread:u128 = env.nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128;
         let mut search_space:u128 = env.nodes_per_leaf_node as u128 * 4;
-        let mut busy_thread = 0;
+        let mut busy_threads = 0;
+        let mut last_depth = depth;
         let mut result = None;
 
         env.abort.store(false,Ordering::Release);
 
         loop {
-            if busy_thread == env.max_threads {
+            if busy_threads == env.max_threads {
                 match self.receiver.recv().map_err(|e| ApplicationError::from(e))? {
-                    Ok(EvaluationResult::Immediate(s, mvs, zh)) if base_depth <= depth => {
-                        busy_thread -= 1;
+                    Ok(RootEvaluationResult::Immediate(s, mvs, zh,_)) if base_depth <= depth => {
+                        busy_threads -= 1;
 
-                        env.abort.store(true,Ordering::Release);
-
-                        while busy_thread > 0 {
-                            let _ = self.receiver.recv()?;
-                            busy_thread -= 1;
-                        }
+                        self.termination(env,busy_threads)?;
 
                         return Ok(EvaluationResult::Immediate(s, mvs, zh));
                     },
-                    Ok(EvaluationResult::Immediate(s, mvs, zh)) => {
-                        busy_thread -= 1;
+                    Ok(RootEvaluationResult::Immediate(s, mvs, zh,depth)) => {
+                        busy_threads -= 1;
 
-                        if s > gs.best_score {
-                            gs.best_score = s;
+                        if depth >= last_depth {
+                            last_depth = depth;
+
+                            if s > gs.best_score {
+                                gs.best_score = s;
+                            }
+
+                            result = Some(EvaluationResult::Immediate(s, mvs, zh));
                         }
-
-                        result = Some(EvaluationResult::Immediate(s, mvs, zh));
                     },
-                    Ok(EvaluationResult::Timeout) => {
-                        busy_thread -= 1;
+                    Ok(RootEvaluationResult::Timeout) => {
+                        busy_threads -= 1;
 
-                        env.abort.store(true,Ordering::Release);
-
-                        while busy_thread > 0 {
-                            let _ = self.receiver.recv()?;
-                            busy_thread -= 1;
-                        }
+                        self.termination(env,busy_threads)?;
 
                         return Ok(result.unwrap_or(EvaluationResult::Timeout));
                     },
                     Err(e) => {
-                        busy_thread -= 1;
+                        busy_threads -= 1;
 
-                        env.abort.store(true,Ordering::Release);
-
-                        while busy_thread > 0 {
-                            let _ = self.receiver.recv()?;
-                            busy_thread -= 1;
-                        }
+                        self.termination(env,busy_threads)?;
 
                         return Err(e);
                     }
@@ -480,7 +497,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
 
                 self.start_thread(env,gs,evalutor);
 
-                busy_thread += 1;
+                busy_threads += 1;
                 thread_index += 1;
             }
         }
@@ -610,7 +627,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
             prev_move.map(|m| mvs.push_front(m));
 
-            return Ok(EvaluationResult::Immediate(Score::INFINITE,mvs,gs.zh.clone()));
+            return Ok(EvaluationResult::Immediate(Score::NEGINFINITE,mvs,gs.zh.clone()));
         }
 
         if gs.depth == 0 || gs.current_depth >= gs.max_depth {
@@ -652,7 +669,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                                     best_moves = mvs;
 
-                                    if s > gs.best_score && gs.current_depth == 1 {
+                                    if gs.current_depth == 1 && s > gs.best_score {
                                         self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
                                     }
 
@@ -695,7 +712,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                             self.update_best_move(env, &gs.zh, gs.depth, scoreval, beta, start_alpha, Some(m));
 
-                            if s > gs.best_score && gs.current_depth == 1 {
+                            if gs.current_depth == 1 && s > gs.best_score {
                                 self.send_info(env, gs.base_depth, gs.current_depth, &best_moves, &scoreval)?;
                             }
 
