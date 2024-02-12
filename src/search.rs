@@ -24,11 +24,11 @@ use crate::evalutor::Evalutor;
 use crate::transposition_table::{TT, TTPartialEntry, ZobristHash};
 
 pub const TURN_LIMIT:u32 = 10000;
-pub const BASE_DEPTH:u32 = 10;
-pub const MAX_DEPTH:u32 = 10;
-pub const MAX_THREADS:u32 = 2;
-pub const FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD:u8 = 3;
-pub const NODES_PER_LEAF_NODE:u16 = 20;
+pub const BASE_DEPTH:u32 = 14;
+pub const MAX_DEPTH:u32 = 14;
+pub const MAX_THREADS:u32 = 8;
+pub const FACTOR_FOR_NUMBER_OF_NODES_PER_THREAD:u8 = 14;
+pub const NODES_PER_LEAF_NODE:u16 = 5;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Score {
@@ -286,7 +286,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut tte = env.transposition_table.entry(&zh);
         let tte = tte.or_default();
 
-        if tte.score == Score::NEGINFINITE || score == Score::INFINITE ||
+        if tte.depth == -1 || score == Score::INFINITE ||
             (tte.beta >= beta && tte.alpha <= alpha && tte.depth < depth as i8 - 1) ||
             (tte.depth == depth as i8 - 1 && tte.score < score) {
             tte.depth = depth as i8 - 1;
@@ -306,7 +306,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut tte = env.transposition_table.entry(zh);
         let tte = tte.or_default();
 
-        if tte.score == Score::NEGINFINITE || score == Score::INFINITE ||
+        if tte.depth == -1 || score == Score::INFINITE ||
             (tte.beta >= beta && tte.alpha <= alpha && tte.depth < depth as i8) ||
             (tte.depth == depth as i8 && tte.score < score) {
             tte.depth = depth as i8;
@@ -441,8 +441,9 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         let base_depth = gs.depth.min(env.base_depth);
         let mut depth = 1;
         let mut thread_index = 0;
-        let nodes_per_thread:u128 = env.nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128;
-        let mut search_space:u128 = env.nodes_per_leaf_node as u128 * 4;
+        let nodes_per_leaf_node = env.nodes_per_leaf_node as u128;
+        let nodes_per_thread:u128 = nodes_per_leaf_node.pow(env.factor_nodes_per_thread as u32) as u128;
+        let mut search_space:u128 = nodes_per_leaf_node as u128 * 4;
         let mut busy_threads = 0;
         let mut last_depth = depth;
         let mut result = None;
@@ -490,7 +491,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
             } else {
                 if depth < base_depth && thread_index * nodes_per_thread >= search_space {
                     depth += 1;
-                    search_space = search_space * env.nodes_per_leaf_node as u128;
+                    search_space = search_space * nodes_per_leaf_node;
                 }
 
                 gs.depth = depth;
