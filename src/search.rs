@@ -453,7 +453,7 @@ impl<L,S> Search<L,S> for Root<L,S> where L: Logger + Send + 'static, S: InfoSen
         loop {
             if busy_threads == env.max_threads {
                 match self.receiver.recv().map_err(|e| ApplicationError::from(e))? {
-                    Ok(RootEvaluationResult::Immediate(s, mvs, zh,_)) if base_depth <= depth => {
+                    Ok(RootEvaluationResult::Immediate(s, mvs, zh,depth)) if base_depth <= depth => {
                         busy_threads -= 1;
 
                         self.termination(env,busy_threads)?;
