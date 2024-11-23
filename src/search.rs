@@ -554,7 +554,7 @@ impl<L,S> Recursive<L,S> where L: Logger + Send + 'static, S: InfoSender {
             depth += 1;
         }
 
-        let zh = gs.zh.updated(&env.hasher, gs.teban, gs.state.get_banmen(), gs.mc, m.to_applied_move(), &o);
+        let zh = gs.zh.updated(&env.hasher, gs.teban.opposite(), gs.state.get_banmen(), gs.mc, m.to_applied_move(), &o);
 
         let next = Rule::apply_move_none_check(&gs.state, gs.teban, gs.mc, m.to_applied_move());
 
