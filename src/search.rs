@@ -673,7 +673,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
         let mut picker = RandomPicker::new(Prng::new(gs.rng.gen()));
 
-        let count = if Rule::in_check(gs.teban,&gs.state) {
+        let count = if Rule::in_check(gs.teban.opposite(),&gs.state) {
             2
         } else {
             3
@@ -733,7 +733,7 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
                 }
 
                 continue;
-            } else if i == 1 && Rule::in_check(gs.teban,&gs.state) {
+            } else if i == 1 && Rule::in_check(gs.teban.opposite(),&gs.state) {
                 Rule::generate_moves_all::<Evasions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
             } else if i == 1 {
                 Rule::generate_moves_all::<CaptureOrPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
