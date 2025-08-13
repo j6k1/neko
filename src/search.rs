@@ -205,9 +205,9 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
         let mut picker = RandomPicker::new(Prng::new(rng.gen()));
 
         if Rule::in_check(teban.opposite(),state) {
-            Rule::generate_moves_all::<Evasions>(teban,state,mc,&mut picker)?;
+            Rule::generate_moves::<Evasions>(teban,state,mc,&mut picker)?;
         } else {
-            Rule::generate_moves_from_banmen::<CaptureOrPawnPromotions>(teban,state,&mut picker)?;
+            Rule::generate_moves_by_banmen::<CaptureOrPawnPromotions>(teban,state,&mut picker)?;
         }
 
         if picker.len() == 0 {
@@ -734,11 +734,11 @@ impl<L,S> Search<L,S> for Recursive<L,S> where L: Logger + Send + 'static, S: In
 
                 continue;
             } else if i == 1 && Rule::in_check(gs.teban.opposite(),&gs.state) {
-                Rule::generate_moves_all::<Evasions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
+                Rule::generate_moves::<Evasions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
             } else if i == 1 {
-                Rule::generate_moves_all::<CaptureOrPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
+                Rule::generate_moves::<CaptureOrPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
             } else {
-                Rule::generate_moves_all::<QuietsWithoutPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
+                Rule::generate_moves::<QuietsWithoutPawnPromotions>(gs.teban, &gs.state, &gs.mc, &mut picker)?;
             }
 
             for m in &mut picker {

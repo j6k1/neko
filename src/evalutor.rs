@@ -1,5 +1,5 @@
 use usiagent::rule::{Rule, State};
-use usiagent::shogi::{Banmen, MochigomaCollections, Teban};
+use usiagent::shogi::{MochigomaCollections, Teban};
 
 const PIECE_SCORE_MAP:[i32; 29] = [
     90 * 9 / 10,
