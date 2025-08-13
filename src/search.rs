@@ -204,7 +204,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
 
         let mut picker = RandomPicker::new(Prng::new(rng.gen()));
 
-        if Rule::in_check(teban,state) {
+        if Rule::in_check(teban.opposite(),state) {
             Rule::generate_moves_all::<Evasions>(teban,state,mc,&mut picker)?;
         } else {
             Rule::generate_moves_from_banmen::<CaptureOrPawnPromotions>(teban,state,&mut picker)?;
