@@ -192,7 +192,7 @@ pub trait Search<L,S>: Sized where L: Logger + Send + 'static, S: InfoSender {
                      evalutor: &Arc<Evalutor>) -> Result<EvaluationResult,ApplicationError>;
     fn qsearch(&self,teban:Teban,state:&State,mc:&MochigomaCollections,
                mut alpha:Score,beta:Score,depth:usize,evalutor: &Arc<Evalutor>,rng:&mut ThreadRng) -> Result<Score,ApplicationError> {
-        let mut score = Score::Value(evalutor.evalute(teban,state.get_banmen(),mc));
+        let mut score = Score::Value(evalutor.evalute(teban,state,mc));
 
         if score >= beta {
             return Ok(score);

@@ -1,3 +1,4 @@
+use usiagent::rule::{Rule, State};
 use usiagent::shogi::{Banmen, MochigomaCollections, Teban};
 
 const PIECE_SCORE_MAP:[i32; 29] = [
@@ -44,7 +45,9 @@ impl Evalutor {
         Evalutor {}
     }
 
-    pub fn evalute(&self,teban:Teban,banmen:&Banmen,mc:&MochigomaCollections) -> i32 {
+    pub fn evalute(&self,teban:Teban,state:&State,mc:&MochigomaCollections) -> i32 {
+        let banmen = state.get_banmen();
+
         let mut score = 0;
 
         for y in 0..9 {
@@ -79,6 +82,18 @@ impl Evalutor {
             _ => ()
         }
 
+        match teban {
+            Teban::Sente => {
+                score += state.get_part().sente_self_board.iter().map(|p| {
+                    Rule::control_count(teban,state,p) as i32
+                }).fold(0,|acc,c| acc + c);
+            },
+            Teban::Gote => {
+                score += state.get_part().gote_self_board.iter().map(|p| {
+                    Rule::control_count(teban,state,p) as i32
+                }).fold(0,|acc,c| acc + c);
+            }
+        }
         score
     }
 }
