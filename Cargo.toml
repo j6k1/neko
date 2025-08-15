@@ -12,5 +12,4 @@ statrs = "0.16.0"
 rand_distr = "0.4.3"
 parking_lot = "0.12.1"
 rayon = "1.8.1"
-[dependencies.usiagent]
-path = "../USIAgent"
+usiagent = "0.7.0"
